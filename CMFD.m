@@ -1,3 +1,6 @@
+%% Add vlfeat library : slic, sift 
+addpath(genpath('vlfeat-0.9.20-bin'));
+
 %% Initialization and Segmentation
 DEBUG = true;
 path = 'data/MICC_F600/_r30horses.png';
