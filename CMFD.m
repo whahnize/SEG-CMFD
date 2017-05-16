@@ -1,37 +1,57 @@
-%% Add vlfeat library : slic, sift 
-addpath(genpath('vlfeat-0.9.20-bin'));
 
-%% Initialization and Segmentation
+%% Initialization and Adding library
 DEBUG = true;
-path = 'data/MICC_F600/_r30horses.png';
-if DEBUG == false
-    [file, full_path] = uigetfile('*', 'Pick a picture');
+
+if DEBUG == true
+    path = 'data/MICC_F600/red_tower.png';
+else
+    clc; clear; 
+    [file, full_path] = uigetfile('*', 'Pick  a picture to be inspected copy-move forgery ');
     path = strcat(full_path, file);
 end
 
+% Add vlfeat library: vl_slic, 
+addpath(genpath('vlfeat-0.9.20-bin'));
+
 %% Read an image and transform into single type
-copy_img = imread(path);
+copy_img = rgb2gray(imread(path));
 Is = im2single(copy_img);
 [c_r, c_c, c_channel] = size(Is);
-%% Parameter settings for SLIC-based segmentation (parameters are chosen for MICC-F600 dataset)
+%% Parameter settings for SLIC-based segmentation (parameters are chosen for MICC_F600 dataset)
 
-r_size = 50;
-reg = 0.8;
-img_size = c_r * c_c;
+split_path = strsplit(path,'/');
+set = split_path(2);
 
-if img_size > 3000*2000
-    r_size = 200;
-elseif img_size > 2000*1000
-    r_size = 150;
-elseif img_size > 1000*600
-    r_size = 100;
+if strcmpi(set,'MICC_F600')
+    % parameters for vl_slic
+    r_size = 300;
+    reg = 0.8;
+    img_size = c_r * c_c;
+
+%     if img_size > 3000*2000
+%         r_size = 200;
+%     elseif img_size > 2000*1000
+%         r_size = 150;
+%     elseif img_size > 1000*600
+%         r_size = 100;
+%     else
+%         r_size = 50;
+%     end
+    SEGMENTS = vl_slic(Is, r_size, reg);
+elseif strcmpi(set, 'Christlein')
+    % parameters for vl_quickseg
+    ratio = 0.7;
+    kernel = 1;
+
+    % TO DO: figure out what parameter 'MAXDIST' means and what an adequate value is  
+    SEGMENTS = vl_quickseg(Is, 0.7,1,0);
 else
-    r_size = 50;
+    disp('dataset cannot be identified');
+    return
 end
 
-SEGMENTS = vl_slic(Is, r_size, reg);
 %% Visualize segmentation result
-%VisSegmentation(copy_img,SEGMENTS);
+VisSegmentation(copy_img,SEGMENTS);
 
 %% First Matching (Robust matching)
 %% 1. Keypoint Extraction (SIFT)
