@@ -14,7 +14,7 @@ end
 addpath(genpath('vlfeat-0.9.20-bin'));
 
 %% Read an image and transform into single type
-copy_img = rgb2gray(imread(path));
+copy_img = imread(path);
 Is = im2single(copy_img);
 [c_r, c_c, c_channel] = size(Is);
 %% Parameter settings for SLIC-based segmentation (parameters are chosen for MICC_F600 dataset)
@@ -24,19 +24,19 @@ set = split_path(2);
 
 if strcmpi(set,'MICC_F600')
     % parameters for vl_slic
-    r_size = 300;
+    r_size = 50;
     reg = 0.8;
     img_size = c_r * c_c;
 
-%     if img_size > 3000*2000
-%         r_size = 200;
-%     elseif img_size > 2000*1000
-%         r_size = 150;
-%     elseif img_size > 1000*600
-%         r_size = 100;
-%     else
-%         r_size = 50;
-%     end
+    if img_size > 3000*2000
+        r_size = 200;
+    elseif img_size > 2000*1000
+        r_size = 150;
+    elseif img_size > 1000*600
+        r_size = 100;
+    else
+        r_size = 50;
+    end
     SEGMENTS = vl_slic(Is, r_size, reg);
 elseif strcmpi(set, 'Christlein')
     % parameters for vl_quickseg
@@ -51,7 +51,7 @@ else
 end
 
 %% Visualize segmentation result
-VisSegmentation(copy_img,SEGMENTS);
+% VisSegmentation(copy_img,SEGMENTS);
 
 %% First Matching (Robust matching)
 %% 1. Keypoint Extraction (SIFT)
@@ -61,7 +61,7 @@ Ig = rgb2gray(copy_img);
 % Compute SIFT features
 [f,d] = vl_sift(single(Ig));
 
-% Patch - keypoints map (patch_num: [keypoint1, keypoint2, ...])
+% Patch - keypoints map (patch_num: [descriptor of keypoint1,descriptor of keypoint2, ...])
 patchToKeypoints = containers.Map('KeyType','int32','ValueType','any');
 
 % Initialize container
