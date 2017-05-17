@@ -37,14 +37,15 @@ if strcmpi(set,'MICC_F600')
     else
         r_size = 50;
     end
-    SEGMENTS = vl_slic(Is, r_size, reg);
+    SEGMENTS = vl_slic(Is, r_size, reg)+1;
 elseif strcmpi(set, 'Christlein')
     % parameters for vl_quickseg
     ratio = 0.7;
     kernel = 1;
-
     % TO DO: figure out what parameter 'MAXDIST' means and what an adequate value is  
-    SEGMENTS = vl_quickseg(Is, 0.7,1,0);
+    maxdist = 0;
+    
+    SEGMENTS = vl_quickseg(Is, 0.7,1,maxdist)+1;
 else
     disp('dataset cannot be identified');
     return
@@ -65,51 +66,93 @@ Ig = rgb2gray(copy_img);
 patchToKeypoints = containers.Map('KeyType','int32','ValueType','any');
 
 % Initialize container
-maxPatch = max(SEGMENTS(:));
-for k = 0:maxPatch
+maxPatch = double(max(SEGMENTS(:)));
+for k = 1:maxPatch
     if ~(isKey(patchToKeypoints, k))
         patchToKeypoints(k) = [];
     end
 end
 
-% Assign keypoints to each patch
+% Normalize descriptors and assign them to each patch
 [feature_elements, num_of_features] = size(f);
+norm_d = zeros(size(d));
 for n_f = 1:num_of_features
     feature_x = f(1,n_f);
     feature_y = f(2,n_f);
     feature_d = double(d(:,n_f));
+    % first norm
     feature_d = feature_d / norm(feature_d);
+    % trancate using 0.2 as a threshold 
+%     feature_d(feature_d>0.2) = 0.2;
+%     % second norm
+%     feature_d = feature_d / norm(feature_d);
+    norm_d(:,n_f) = feature_d;
     cur_seg = SEGMENTS(int32(feature_y),int32(feature_x));
     patchToKeypoints(cur_seg) = [patchToKeypoints(cur_seg); transpose(feature_d)];
 end
 
-threshold = 10 * num_of_features / (maxPatch+1); % including [0-maxPatch]
 % Patch matching using k-d tree
-matched_list = [];
-for p1 = 0:maxPatch-1
+kdtree = vl_kdtreebuild(norm_d);
+dis_threshold = 0.04;
+for p1 = 1:maxPatch
     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
     num_of_keypoints_p1 = size(keypoints_p1, 1);
     point1_set = transpose(keypoints_p1);
-    for p2 = p1+1:maxPatch
-        num_matched_keypoints = 0;
-        keypoints_p2 = patchToKeypoints(p2); % [descriptor 1; descriptor 2; ...]
-        num_of_keypoints_p2 = size(keypoints_p2, 1);
-        point2_set = transpose(keypoints_p2);
-        kdtree = vl_kdtreebuild(point2_set);
-        [index,distance] = vl_kdtreequery(kdtree, point2_set, point1_set, 'NumNeighbors', 10);
+    num_matched_keypoints = zeros(maxPatch,1);
+    for keypoint = 1:num_of_keypoints_p1
+        % k-nearest neighbers 11= 1 + 10
+        [index, distance] = vl_kdtreequery(kdtree, norm_d, point1_set(:, keypoint), 'NumNeighbors', 11); 
+        thres_matched_points = floor(f(1:2,index(distance<dis_threshold)));
+        x_coords = thres_matched_points(2,:);
+        y_coords = thres_matched_points(1,:);
+        matched_patches = diag(SEGMENTS(x_coords,y_coords));
+        % ISSUE: should we include its own patch or exclude it when setting
+        % threshold?
         
-        for k = 1:num_of_keypoints_p1
-            for cand = 1:10
-                if distance(cand, k) < 0.16
-                    num_matched_keypoints = num_matched_keypoints + 1;
-                end
-            end
-        end
-        if num_matched_keypoints > threshold
-            display(num_matched_keypoints);
-        end
+        % Add 1 to the patches whose descriptors are matched by query
+        % descriptor including own patch
+        % num_matched_keypoints(matched_patches) = num_matched_keypoints(matched_patches) + 1;
+        
+        % Excluded matching
+        num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
+    threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
+    suspicious_patches = find(num_matched_keypoints>threshold & ~p1);
+    
+    if ~isempty(suspicious_patches)
+        X = sprintf(' index of source patch: %d\n num of suspicious patches: %d',p1,sum(suspicious_patches));
+        disp(X);
+    end
+    
 end
+% matched_list = [];
+% for p1 = 0:maxPatch-1
+%     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
+%     num_of_keypoints_p1 = size(keypoints_p1, 1);
+%     point1_set = transpose(keypoints_p1);
+%     for p2 = p1+1:maxPatch
+%         num_matched_keypoints = 0;
+%         keypoints_p2 = patchToKeypoints(p2); % [descriptor 1; descriptor 2; ...]
+%         if isempty(keypoints_p2) 
+%             continue 
+%         end
+%         num_of_keypoints_p2 = size(keypoints_p2, 1);
+%         point2_set = transpose(keypoints_p2);
+%         kdtree = vl_kdtreebuild(point2_set);
+%         [index,distance] = vl_kdtreequery(kdtree, point2_set, point1_set, 'NumNeighbors', 10);
+%         
+%         for k = 1:num_of_keypoints_p1
+%             for cand = 1:10
+%                 if distance(cand, k) < 0.16
+%                     num_matched_keypoints = num_matched_keypoints + 1;
+%                 end
+%             end
+%         end
+%         if num_matched_keypoints > threshold
+%             display(num_matched_keypoints);
+%         end
+%     end
+% end
 
 %% Second Matching (Iteration)
 %% 
