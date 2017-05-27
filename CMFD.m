@@ -10,7 +10,7 @@ else
     path = strcat(full_path, file);
 end
 
-% Add vlfeat library: vl_slic, 
+% Add vlfeat library: vl_* 
 addpath(genpath('vlfeat-0.9.20-bin'));
 
 %% Read an image and transform into single type
@@ -83,9 +83,9 @@ for n_f = 1:num_of_features
     % first norm
     feature_d = feature_d / norm(feature_d);
     % trancate using 0.2 as a threshold 
-%     feature_d(feature_d>0.2) = 0.2;
-%     % second norm
-%     feature_d = feature_d / norm(feature_d);
+    feature_d(feature_d>0.2) = 0.2;
+    % second norm
+    feature_d = feature_d / norm(feature_d);
     norm_d(:,n_f) = feature_d;
     cur_seg = SEGMENTS(int32(feature_y),int32(feature_x));
     patchToKeypoints(cur_seg) = [patchToKeypoints(cur_seg); transpose(feature_d)];
@@ -93,8 +93,8 @@ end
 
 % Patch matching using k-d tree
 kdtree = vl_kdtreebuild(norm_d);
-dis_threshold = 0.04;
-for p1 = 1:maxPatch
+dis_threshold = 0.4;
+for p1 = 1:1
     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
     num_of_keypoints_p1 = size(keypoints_p1, 1);
     point1_set = transpose(keypoints_p1);
@@ -103,9 +103,9 @@ for p1 = 1:maxPatch
         % k-nearest neighbers 11= 1 + 10
         [index, distance] = vl_kdtreequery(kdtree, norm_d, point1_set(:, keypoint), 'NumNeighbors', 11); 
         thres_matched_points = floor(f(1:2,index(distance<dis_threshold)));
-        x_coords = thres_matched_points(2,:);
-        y_coords = thres_matched_points(1,:);
-        matched_patches = diag(SEGMENTS(x_coords,y_coords));
+        x_coords = thres_matched_points(1,:);
+        y_coords = thres_matched_points(2,:);
+        matched_patches = diag(SEGMENTS(y_coords,x_coords));
         % ISSUE: should we include its own patch or exclude it when setting
         % threshold?
         
@@ -117,7 +117,7 @@ for p1 = 1:maxPatch
         num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
     threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
-    suspicious_patches = find(num_matched_keypoints>threshold & ~p1);
+    suspicious_patches = find(num_matched_keypoints>threshold & num_matched_keypoints~=p1);
     
     if ~isempty(suspicious_patches)
         X = sprintf(' index of source patch: %d\n num of suspicious patches: %d',p1,sum(suspicious_patches));
@@ -146,6 +146,7 @@ end
 %                 if distance(cand, k) < 0.16
 %                     num_matched_keypoints = num_matched_keypoints + 1;
 %                 end
+
 %             end
 %         end
 %         if num_matched_keypoints > threshold
