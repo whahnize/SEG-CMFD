@@ -1,9 +1,10 @@
 
 %% Initialization and Adding library
+clear all; clc;
 DEBUG = true;
 
 if DEBUG == true
-    path = 'data/MICC_F600/red_tower.png';
+    path = 'data/MICC_F600/horses.png';
 else
     clc; clear; 
     [file, full_path] = uigetfile('*', 'Pick  a picture to be inspected copy-move forgery ');
@@ -93,8 +94,9 @@ end
 
 % Patch matching using k-d tree
 kdtree = vl_kdtreebuild(norm_d);
-dis_threshold = 0.4;
-for p1 = 1:1
+dis_threshold = realmax;
+patch_pair = [];
+for p1 = 1:maxPatch
     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
     num_of_keypoints_p1 = size(keypoints_p1, 1);
     point1_set = transpose(keypoints_p1);
@@ -109,19 +111,25 @@ for p1 = 1:1
         % ISSUE: should we include its own patch or exclude it when setting
         % threshold?
         
+        % Included matching
         % Add 1 to the patches whose descriptors are matched by query
         % descriptor including own patch
-        % num_matched_keypoints(matched_patches) = num_matched_keypoints(matched_patches) + 1;
+        num_matched_keypoints(matched_patches) = num_matched_keypoints(matched_patches) + 1;
         
         % Excluded matching
-        num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
+        % num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
     threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
-    suspicious_patches = find(num_matched_keypoints>threshold & num_matched_keypoints~=p1);
+    suspicious_patches = find(num_matched_keypoints>threshold);
+    % Exclude src patch
+    suspicious_patches =  suspicious_patches(suspicious_patches~=p1);
     
     if ~isempty(suspicious_patches)
-        X = sprintf(' index of source patch: %d\n num of suspicious patches: %d',p1,sum(suspicious_patches));
+        X = sprintf(' index of source patch: %d\n number of suspicious patches: %d',p1,size(suspicious_patches,1));
         disp(X);
+        % p1 pair [src_patch suspicious_patch threshold num_of_p1_feature num_of_supicious_feature]
+        p1_pair = [ones(size(suspicious_patches,1),1)*p1 suspicious_patches threshold num_matched_keypoints(p1) num_matched_keypoints(suspicious_patches)];
+        patch_pair = [patch_pair; p1_pair];
     end
     
 end
