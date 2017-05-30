@@ -52,9 +52,7 @@ else
     return
 end
 
-%% Visualize segmentation result
-% VisSegmentation(copy_img,SEGMENTS);
-
+seg_im=VisSegmentation(copy_img,SEGMENTS);
 %% First Matching (Robust matching)
 %% 1. Keypoint Extraction (SIFT)
 % Compute gray scale image
@@ -121,8 +119,8 @@ for p1 = 1:maxPatch
     end
     threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
     suspicious_patches = find(num_matched_keypoints>threshold);
-    % Exclude src patch
-    suspicious_patches =  suspicious_patches(suspicious_patches~=p1);
+    % Exclude src patch and replicated pair
+    suspicious_patches = suspicious_patches(suspicious_patches>p1);
     
     if ~isempty(suspicious_patches)
         X = sprintf(' index of source patch: %d\n number of suspicious patches: %d',p1,size(suspicious_patches,1));
@@ -133,35 +131,19 @@ for p1 = 1:maxPatch
     end
     
 end
-% matched_list = [];
-% for p1 = 0:maxPatch-1
-%     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
-%     num_of_keypoints_p1 = size(keypoints_p1, 1);
-%     point1_set = transpose(keypoints_p1);
-%     for p2 = p1+1:maxPatch
-%         num_matched_keypoints = 0;
-%         keypoints_p2 = patchToKeypoints(p2); % [descriptor 1; descriptor 2; ...]
-%         if isempty(keypoints_p2) 
-%             continue 
-%         end
-%         num_of_keypoints_p2 = size(keypoints_p2, 1);
-%         point2_set = transpose(keypoints_p2);
-%         kdtree = vl_kdtreebuild(point2_set);
-%         [index,distance] = vl_kdtreequery(kdtree, point2_set, point1_set, 'NumNeighbors', 10);
-%         
-%         for k = 1:num_of_keypoints_p1
-%             for cand = 1:10
-%                 if distance(cand, k) < 0.16
-%                     num_matched_keypoints = num_matched_keypoints + 1;
-%                 end
-
-%             end
-%         end
-%         if num_matched_keypoints > threshold
-%             display(num_matched_keypoints);
-%         end
-%     end
-% end
+%% Visualize segmentation result
+% visualize suspicous patch using patch_pair data;
+num_pair = size(patch_pair,1);
+src= single(zeros(size(SEGMENTS)));
+des= single(zeros(size(SEGMENTS)));
+for p = 1:num_pair
+    src(SEGMENTS==patch_pair(p,1)) = 1;
+    des(SEGMENTS==patch_pair(p,2)) = 1;
+end
+B = imoverlay(seg_im,src,'blue');
+imshow(B);
+B = imoverlay(B,des,'red');
+imshow(B);
 
 %% Second Matching (Iteration)
 %% 
