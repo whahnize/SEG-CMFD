@@ -52,6 +52,7 @@ else
     return
 end
 
+%% Visualize segmentation result
 seg_im=VisSegmentation(copy_img,SEGMENTS);
 %% First Matching (Robust matching)
 %% 1. Keypoint Extraction (SIFT)
@@ -94,17 +95,19 @@ end
 kdtree = vl_kdtreebuild(norm_d);
 dis_threshold = realmax;
 patch_pair = [];
+patch_keypoints = [];
 for p1 = 1:maxPatch
     keypoints_p1 = patchToKeypoints(p1); % [descriptor 1; descriptor 2; ...]
     num_of_keypoints_p1 = size(keypoints_p1, 1);
     point1_set = transpose(keypoints_p1);
     num_matched_keypoints = zeros(maxPatch,1);
+    matched_keypoints = cell(1,maxPatch);
     for keypoint = 1:num_of_keypoints_p1
         % k-nearest neighbers 11= 1 + 10
         [index, distance] = vl_kdtreequery(kdtree, norm_d, point1_set(:, keypoint), 'NumNeighbors', 11); 
-        thres_matched_points = floor(f(1:2,index(distance<dis_threshold)));
-        x_coords = thres_matched_points(1,:);
-        y_coords = thres_matched_points(2,:);
+        thres_matched_points = f(1:2,index(distance<dis_threshold));
+        x_coords = floor(thres_matched_points(1,:));
+        y_coords = floor(thres_matched_points(2,:));
         matched_patches = diag(SEGMENTS(y_coords,x_coords));
         % ISSUE: should we include its own patch or exclude it when setting
         % threshold?
@@ -114,11 +117,16 @@ for p1 = 1:maxPatch
         % descriptor including own patch
         num_matched_keypoints(matched_patches) = num_matched_keypoints(matched_patches) + 1;
         
+        % Store matched keypoints for each patches
+        for patch_index = 1:size(matched_patches,1)
+            matched_keypoints{1,matched_patches(patch_index)} = [matched_keypoints{1,matched_patches(patch_index)}; thres_matched_points(:,1).' thres_matched_points(:,patch_index).'];
+        end
+        
         % Excluded matching
         % num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
-    threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
-    suspicious_patches = find(num_matched_keypoints>threshold);
+    match_threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
+    suspicious_patches = find(num_matched_keypoints>match_threshold);
     % Exclude src patch and replicated pair
     suspicious_patches = suspicious_patches(suspicious_patches>p1);
     
@@ -126,13 +134,24 @@ for p1 = 1:maxPatch
         X = sprintf(' index of source patch: %d\n number of suspicious patches: %d',p1,size(suspicious_patches,1));
         disp(X);
         % p1 pair [src_patch suspicious_patch threshold num_of_p1_feature num_of_supicious_feature]
-        p1_pair = [ones(size(suspicious_patches,1),1)*p1 suspicious_patches threshold num_matched_keypoints(p1) num_matched_keypoints(suspicious_patches)];
+        p1_pair = [ones(size(suspicious_patches,1),1)*p1 suspicious_patches ones(size(suspicious_patches,1),1)*match_threshold ones(size(suspicious_patches,1),1)*num_matched_keypoints(p1) num_matched_keypoints(suspicious_patches)];
         patch_pair = [patch_pair; p1_pair];
+        patch_keypoints = [patch_keypoints matched_keypoints(1,suspicious_patches)];
     end
     
 end
-%% Visualize segmentation result
-% visualize suspicous patch using patch_pair data;
+
+% Estimate RANSAC affine transformation using matched feature points between pairs
+% You can transformed image by using 
+% t_s = imwarp(image,tform,'OutputView',imref2d(size(image)));
+
+tforms = [];
+for match = 1:size(patch_keypoints,2)
+    t = estimateGeometricTransform(patch_keypoints{1,match}(:,1:2),patch_keypoints{1,match}(:,3:4),'affine');
+    tforms = [tforms; t];
+end
+
+% visualize suspicous patch pair
 num_pair = size(patch_pair,1);
 src= single(zeros(size(SEGMENTS)));
 des= single(zeros(size(SEGMENTS)));
