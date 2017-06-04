@@ -142,12 +142,13 @@ for p1 = 1:maxPatch
 end
 
 % Estimate RANSAC affine transformation using matched feature points between pairs
-% You can transformed image by using 
+% You can get transformed image by using 
 % t_s = imwarp(image,tform,'OutputView',imref2d(size(image)));
 
 tforms = [];
 for match = 1:size(patch_keypoints,2)
-    t = estimateGeometricTransform(patch_keypoints{1,match}(:,1:2),patch_keypoints{1,match}(:,3:4),'affine');
+    % matrixes which transform source segment to suspicious segment
+    t = estimateGeometricTransform(patch_keypoints{1,match}(:,3:4),patch_keypoints{1,match}(:,1:2),'affine');
     tforms = [tforms; t];
 end
 
@@ -165,4 +166,20 @@ B = imoverlay(B,des,'red');
 imshow(B);
 
 %% Second Matching (Iteration)
+
+% EM algorithm for estimating tform more accurately 
+
+for pair = 1:num_pair
+    src_idx = patch_pair(pair,1); 
+    cmf_idx = patch_pair(pair,2);
+    
+    % First step: find new coordnates in transformed image whose DENSE sift
+    % descriptor are more similar to copying source patch than old coordinates.
+    I_src = single(Ig);
+    t_segments = imwarp(SEGMENTS,invert(tforms(pair)),'OutputView',imref2d(size(SEGMENTS)));
+    I_hat = imwarp(I_src,invert(tforms(pair)),'OutputView',imref2d(size(I_src)));
+    
+    [src_row,src_col] = find(SEGMENTS==src_idx);
+    [cmf_row,cmf_col] = find(t_segments==cmf_idx);
+end
 %% 
