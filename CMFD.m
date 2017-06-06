@@ -6,12 +6,12 @@ DEBUG = true;
 if DEBUG == true
     path = 'data/MICC_F600/horses.png';
 else
-    clc; clear; 
+    clc; clear;
     [file, full_path] = uigetfile('*', 'Pick  a picture to be inspected copy-move forgery ');
     path = strcat(full_path, file);
 end
 
-% Add vlfeat library: vl_* 
+% Add vlfeat library: vl_*
 addpath(genpath('vlfeat-0.9.20-bin'));
 
 %% Read an image and transform into single type
@@ -28,7 +28,7 @@ if strcmpi(set,'MICC_F600')
     r_size = 50;
     reg = 0.8;
     img_size = c_r * c_c;
-
+    
     if img_size > 3000*2000
         r_size = 200;
     elseif img_size > 2000*1000
@@ -43,7 +43,7 @@ elseif strcmpi(set, 'Christlein')
     % parameters for vl_quickseg
     ratio = 0.7;
     kernel = 1;
-    % TO DO: figure out what parameter 'MAXDIST' means and what an adequate value is  
+    % TO DO: figure out what parameter 'MAXDIST' means and what an adequate value is
     maxdist = 0;
     
     SEGMENTS = vl_quickseg(Is, 0.7,1,maxdist)+1;
@@ -82,7 +82,7 @@ for n_f = 1:num_of_features
     feature_d = double(d(:,n_f));
     % first norm
     feature_d = feature_d / norm(feature_d);
-    % trancate using 0.2 as a threshold 
+    % trancate using 0.2 as a threshold
     feature_d(feature_d>0.2) = 0.2;
     % second norm
     feature_d = feature_d / norm(feature_d);
@@ -104,7 +104,7 @@ for p1 = 1:maxPatch
     matched_keypoints = cell(1,maxPatch);
     for keypoint = 1:num_of_keypoints_p1
         % k-nearest neighbers 11= 1 + 10
-        [index, distance] = vl_kdtreequery(kdtree, norm_d, point1_set(:, keypoint), 'NumNeighbors', 11); 
+        [index, distance] = vl_kdtreequery(kdtree, norm_d, point1_set(:, keypoint), 'NumNeighbors', 11);
         thres_matched_points = f(1:2,index(distance<dis_threshold));
         x_coords = floor(thres_matched_points(1,:));
         y_coords = floor(thres_matched_points(2,:));
@@ -125,7 +125,7 @@ for p1 = 1:maxPatch
         % Excluded matching
         % num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
-    match_threshold = 10 * sum(num_matched_keypoints) / maxPatch; 
+    match_threshold = 10 * sum(num_matched_keypoints) / maxPatch;
     suspicious_patches = find(num_matched_keypoints>match_threshold);
     % Exclude src patch and replicated pair
     suspicious_patches = suspicious_patches(suspicious_patches>p1);
@@ -142,13 +142,13 @@ for p1 = 1:maxPatch
 end
 
 % Estimate RANSAC affine transformation using matched feature points between pairs
-% You can get transformed image by using 
+% You can get transformed image by using
 % t_s = imwarp(image,tform,'OutputView',imref2d(size(image)));
 
 tforms = [];
 for match = 1:size(patch_keypoints,2)
     % matrixes which transform source segment to suspicious segment
-    t = estimateGeometricTransform(patch_keypoints{1,match}(:,3:4),patch_keypoints{1,match}(:,1:2),'affine');
+    t = estimateGeometricTransform(patch_keypoints{1,match}(:,1:2),patch_keypoints{1,match}(:,3:4),'affine');
     tforms = [tforms; t];
 end
 
@@ -167,19 +167,59 @@ imshow(B);
 
 %% Second Matching (Iteration)
 
-% EM algorithm for estimating tform more accurately 
+% EM algorithm for estimating tform more accurately
 
 for pair = 1:num_pair
-    src_idx = patch_pair(pair,1); 
+    src_idx = patch_pair(pair,1);
     cmf_idx = patch_pair(pair,2);
     
-    % First step: find new coordnates in transformed image whose DENSE sift
-    % descriptor are more similar to copying source patch than old coordinates.
-    I_src = single(Ig);
-    t_segments = imwarp(SEGMENTS,invert(tforms(pair)),'OutputView',imref2d(size(SEGMENTS)));
+    %% First step: find new coordnates in transformed image whose DENSE sift
+    %% descriptor are more similar to copying source patch than those of old coordinates.
+    I_src = Ig;
     I_hat = imwarp(I_src,invert(tforms(pair)),'OutputView',imref2d(size(I_src)));
     
+    % Construct X which stores the coordinates of source copying pathces in
+    % original image
     [src_row,src_col] = find(SEGMENTS==src_idx);
-    [cmf_row,cmf_col] = find(t_segments==cmf_idx);
+    X = [src_col.'; src_row.';  ones(1,size(src_row,1))];
+    
+    % Parameters for dense sift. You can find detail explanations at http://www.vlfeat.org/matlab/vl_dsift.html
+    step = 1; % for every pixel
+    bin_size = 2; % should be even number to generate descriptor at integer coordinates
+    
+    % Extract dense sift descriptor on every pixels in origin image and in
+    % transformed image
+    src_bounds = [min(src_col)-3/2*bin_size min(src_row)-3/2*bin_size max(src_col)+3/2*bin_size max(src_row)+3/2*bin_size];
+    [src_f, src_d] = vl_dsift(single(I_src), 'step', step, 'size', bin_size, 'bounds',bounds);
+    
+    trans_bounds = src_bounds + [-1 -1 1 1];
+    [trans_f, trans_d] = vl_dsift(single(I_hat), 'step', step, 'size', bin_size, 'bounds',trans_bounds);
+    
+    % Construct Y which stores the coordinates of matching well with each x
+    % in transformed image (I_hat)
+    Y = ones(size(X));
+    direc = [-1 0; 1 0; 0 -1; 0 1; 0 0]; % up, down, left, right, center 
+    for pixel = 1:size(X,2)
+        x_hat = X(1:2,pixel);
+        % descriptor at x
+        origin_desc = src_d(:,src_f(1,:)==x_hat(1) & src_f(2,:)==x_hat(2));
+        % descriptors at up, down, left, center of x_hat
+        trans_desc = zeros(size(src_d,1),5);
+        for di = 1:5
+            trans_desc(:,di) = trans_d(:,trans_f(1,:)==x_hat(1)+direc(di,1) & trans_f(2,:)==x_hat(2)+ direc(di,2));
+        end
+        distances = pdist(double([origin_desc trans_desc].'), 'euclidean');
+        [~,min_idx] = min(distances(1:5));
+        Y(1:2,pixel) =  x_hat + direc(min_idx,:).';
+    end
+    % retransform Y back to the original image
+    X_tilde = tforms(pair).T.'*Y;
+    
+    %% Second step: calculate Hn
+    % Construct X_prime which stores the coordinates of suspicious patches
+    % in original image
+    [cmf_row,cmf_col] = find(SEGMENTS==cmf_idx);
+    X_prime = [cmf_col.'; cmf_row.';  ones(1,size(cmf_row,1))];
+    
 end
-%% 
+%%
