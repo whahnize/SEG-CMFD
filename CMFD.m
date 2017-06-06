@@ -126,7 +126,7 @@ for p1 = 1:maxPatch
         % num_matched_keypoints(matched_patches~=p1) = num_matched_keypoints(matched_patches~=p1) + 1;
     end
     match_threshold = 10 * sum(num_matched_keypoints) / maxPatch;
-    suspicious_patches = find(num_matched_keypoints>match_threshold);
+    suspicious_patches = find(num_matched_keypoints>match_threshold & num_matched_keypoints>3); % 3 for RANSAC
     % Exclude src patch and replicated pair
     suspicious_patches = suspicious_patches(suspicious_patches>p1);
     
@@ -146,11 +146,23 @@ end
 % t_s = imwarp(image,tform,'OutputView',imref2d(size(image)));
 
 tforms = [];
+patch_pair_tmp = [];
+patch_keypoints_tmp = [];
 for match = 1:size(patch_keypoints,2)
     % matrixes which transform source segment to suspicious segment
-    t = estimateGeometricTransform(patch_keypoints{1,match}(:,1:2),patch_keypoints{1,match}(:,3:4),'affine');
-    tforms = [tforms; t];
+    try
+        t = estimateGeometricTransform(patch_keypoints{1,match}(:,1:2),patch_keypoints{1,match}(:,3:4),'affine');
+        tforms = [tforms; t];
+        patch_pair_tmp = [patch_pair_tmp; patch_pair(match,:)];
+        patch_keypoints_tmp = [patch_keypoints_tmp; patch_keypoints(1,match)];
+    catch ME
+        disp('Not enough inliner keypoints'); patch_pair(match,:);
+    end
 end
+
+patch_pair = patch_pair_tmp;
+patch_keypoints = patch_keypoints_tmp;
+clearvars patch_keypoints_tmp patch_pair_tmp;
 
 % visualize suspicous patch pair
 num_pair = size(patch_pair,1);
@@ -177,6 +189,10 @@ for pair = 1:num_pair
     Iter_thres = 70;
     I_src = Ig;
     
+    % Parameters for dense sift. You can find detail explanations at http://www.vlfeat.org/matlab/vl_dsift.html
+    step = 1; % for every pixel
+    bin_size = 2; % should be even number to generate descriptor at integer coordinates
+
     % Construct X which stores the coordinates of source copying pathces in
     % original image
     [src_row,src_col] = find(SEGMENTS==src_idx);
@@ -187,14 +203,10 @@ for pair = 1:num_pair
     [src_f, src_d] = vl_dsift(single(I_src), 'step', step, 'size', bin_size, 'bounds',src_bounds);
     
     iter = 0;
-    while det(H_cur-H_prev) < H_thres || iter < Iter_thres
+    while det(H_cur-H_prev) > H_thres && iter < Iter_thres
        %% First step: find new coordnates in transformed image whose DENSE sift
        %% descriptor are more similar to copying source patch than those of old coordinates.
         I_hat = imwarp(I_src,invert(affine2d(H_cur)),'OutputView',imref2d(size(I_src)));
-
-        % Parameters for dense sift. You can find detail explanations at http://www.vlfeat.org/matlab/vl_dsift.html
-        step = 1; % for every pixel
-        bin_size = 2; % should be even number to generate descriptor at integer coordinates
 
         % Extract dense sift descriptor on every pixels in transformed image
         trans_bounds = src_bounds + [-1 -1 1 1];
@@ -226,11 +238,15 @@ for pair = 1:num_pair
         [cmf_row,cmf_col] = find(SEGMENTS==cmf_idx);
         X_prime = [cmf_col.'; cmf_row.';  ones(1,size(cmf_row,1))];
         
+        % Quadratic optimization
         H_prev = H_cur;
         H_cur = inv(X*X.')*X*X_tilde.';
         H_cur(:,3)=[0;0;1];
         
+        tforms(pair) = affine2d(H_cur);
         iter = iter+1;
     end
 end
-%%
+
+%% Visualize the copy move fogery region
+
