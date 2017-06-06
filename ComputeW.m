@@ -15,10 +15,10 @@ function [ W ] = ComputeW( Intensity, X, X_prime, X_tilde_prime, Hn_1, f_x, d_x,
         x_p = X_prime(:,i);
         x_tilde_p = X_tilde_prime(:,i);
         
-        temp2 = H_n1\x_tilde_p;
+        temp2 = Hn_1\x_tilde_p;
         temp4 = (x_i - temp2).' * (x_i - temp2);
         
-        p_4 = PDF(x_i, x_p, H_n1, 1.0, f_x, d_x, f_xp, d_xp);
+        p_4 = PDF(x_i, x_p, Hn_1, 1.0, f_x, d_x, f_xp, d_xp);
         p_17 = exp(temp4);
         W(i,i) = p_17 / (p_10_i + p_4);
     end

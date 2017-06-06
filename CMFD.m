@@ -1,7 +1,7 @@
 
 %% Initialization and Adding library
 clear all; clc;
-DEBUG = true;
+DEBUG = false;
 
 if DEBUG == true
     path = 'data/MICC_F600/horses.png';
@@ -20,8 +20,8 @@ Is = im2single(copy_img);
 [c_r, c_c, c_channel] = size(Is);
 %% Parameter settings for SLIC-based segmentation (parameters are chosen for MICC_F600 dataset)
 
-split_path = strsplit(path,'/');
-set = split_path(2);
+split_path = strsplit(path,'\');
+set = split_path(5);
 
 if strcmpi(set,'MICC_F600')
     % parameters for vl_slic
@@ -168,58 +168,69 @@ imshow(B);
 %% Second Matching (Iteration)
 
 % EM algorithm for estimating tform more accurately
-
 for pair = 1:num_pair
     src_idx = patch_pair(pair,1);
     cmf_idx = patch_pair(pair,2);
-    
-    %% First step: find new coordnates in transformed image whose DENSE sift
-    %% descriptor are more similar to copying source patch than those of old coordinates.
+    H_cur = tforms(pair).T;
+    H_prev = zeros(3);
+    H_thres = 0.03;
+    Iter_thres = 70;
     I_src = Ig;
-    I_hat = imwarp(I_src,invert(tforms(pair)),'OutputView',imref2d(size(I_src)));
     
     % Construct X which stores the coordinates of source copying pathces in
     % original image
     [src_row,src_col] = find(SEGMENTS==src_idx);
-    X = [src_col.'; src_row.';  ones(1,size(src_row,1))];
+    X = [src_col.'; src_row.';  ones(1,size(src_row,1))];   
     
-    % Parameters for dense sift. You can find detail explanations at http://www.vlfeat.org/matlab/vl_dsift.html
-    step = 1; % for every pixel
-    bin_size = 2; % should be even number to generate descriptor at integer coordinates
-    
-    % Extract dense sift descriptor on every pixels in origin image and in
-    % transformed image
+    % Extract dense sift descriptor on every pixels in origin image 
     src_bounds = [min(src_col)-3/2*bin_size min(src_row)-3/2*bin_size max(src_col)+3/2*bin_size max(src_row)+3/2*bin_size];
-    [src_f, src_d] = vl_dsift(single(I_src), 'step', step, 'size', bin_size, 'bounds',bounds);
+    [src_f, src_d] = vl_dsift(single(I_src), 'step', step, 'size', bin_size, 'bounds',src_bounds);
     
-    trans_bounds = src_bounds + [-1 -1 1 1];
-    [trans_f, trans_d] = vl_dsift(single(I_hat), 'step', step, 'size', bin_size, 'bounds',trans_bounds);
-    
-    % Construct Y which stores the coordinates of matching well with each x
-    % in transformed image (I_hat)
-    Y = ones(size(X));
-    direc = [-1 0; 1 0; 0 -1; 0 1; 0 0]; % up, down, left, right, center 
-    for pixel = 1:size(X,2)
-        x_hat = X(1:2,pixel);
-        % descriptor at x
-        origin_desc = src_d(:,src_f(1,:)==x_hat(1) & src_f(2,:)==x_hat(2));
-        % descriptors at up, down, left, center of x_hat
-        trans_desc = zeros(size(src_d,1),5);
-        for di = 1:5
-            trans_desc(:,di) = trans_d(:,trans_f(1,:)==x_hat(1)+direc(di,1) & trans_f(2,:)==x_hat(2)+ direc(di,2));
+    iter = 0;
+    while det(H_cur-H_prev) < H_thres || iter < Iter_thres
+       %% First step: find new coordnates in transformed image whose DENSE sift
+       %% descriptor are more similar to copying source patch than those of old coordinates.
+        I_hat = imwarp(I_src,invert(affine2d(H_cur)),'OutputView',imref2d(size(I_src)));
+
+        % Parameters for dense sift. You can find detail explanations at http://www.vlfeat.org/matlab/vl_dsift.html
+        step = 1; % for every pixel
+        bin_size = 2; % should be even number to generate descriptor at integer coordinates
+
+        % Extract dense sift descriptor on every pixels in transformed image
+        trans_bounds = src_bounds + [-1 -1 1 1];
+        [trans_f, trans_d] = vl_dsift(single(I_hat), 'step', step, 'size', bin_size, 'bounds',trans_bounds);
+
+        % Construct Y which stores the coordinates of matching well with each x
+        % in transformed image (I_hat)
+        Y = ones(size(X));
+        direc = [-1 0; 1 0; 0 -1; 0 1; 0 0]; % up, down, left, right, center 
+        for pixel = 1:size(X,2)
+            x_hat = X(1:2,pixel);
+            % descriptor at x
+            origin_desc = src_d(:,src_f(1,:)==x_hat(1) & src_f(2,:)==x_hat(2));
+            % descriptors at up, down, left, center of x_hat
+            trans_desc = zeros(size(src_d,1),5);
+            for di = 1:5
+                trans_desc(:,di) = trans_d(:,trans_f(1,:)==x_hat(1)+direc(di,1) & trans_f(2,:)==x_hat(2)+ direc(di,2));
+            end
+            distances = pdist(double([origin_desc trans_desc].'), 'euclidean');
+            [~,min_idx] = min(distances(1:5));
+            Y(1:2,pixel) =  x_hat + direc(min_idx,:).';
         end
-        distances = pdist(double([origin_desc trans_desc].'), 'euclidean');
-        [~,min_idx] = min(distances(1:5));
-        Y(1:2,pixel) =  x_hat + direc(min_idx,:).';
+        % retransform Y back to the original image
+        X_tilde = H_cur.'*Y;
+
+       %% Second step: calculate Hn
+        % Construct X_prime which stores the coordinates of suspicious patches
+        % in original image
+        [cmf_row,cmf_col] = find(SEGMENTS==cmf_idx);
+        X_prime = [cmf_col.'; cmf_row.';  ones(1,size(cmf_row,1))];
+        
+        H_prev = H_cur;
+        H_cur = inv(X*X.')*X*X_tilde.';
+        H_cur(:,3)=[0;0;1];
+        
+        iter = iter+1;
     end
-    % retransform Y back to the original image
-    X_tilde = tforms(pair).T.'*Y;
-    
-    %% Second step: calculate Hn
-    % Construct X_prime which stores the coordinates of suspicious patches
-    % in original image
-    [cmf_row,cmf_col] = find(SEGMENTS==cmf_idx);
-    X_prime = [cmf_col.'; cmf_row.';  ones(1,size(cmf_row,1))];
-    
 end
 %%
