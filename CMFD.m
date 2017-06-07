@@ -1,14 +1,17 @@
 
 %% Initialization and Adding library
 clear all; clc;
-DEBUG = false;
+DEBUG = true;
 
-if DEBUG == true
-    path = 'data/MICC_F600/horses.png';
+if DEBUG == false
+    path = 'data\MICC_F600\horses.png';
+    gt_path = 'data\MICC_F600\horses_gt.png';
 else
     clc; clear;
     [file, full_path] = uigetfile('*', 'Pick  a picture to be inspected copy-move forgery ');
     path = strcat(full_path, file);
+    file_split = strsplit(path,'.');
+    gt_path = strcat(file_split{1,1},'_gt.',file_split{1,2});
 end
 
 % Add vlfeat library: vl_*
@@ -16,12 +19,13 @@ addpath(genpath('vlfeat-0.9.20-bin'));
 
 %% Read an image and transform into single type
 copy_img = imread(path);
+gt = imread(gt_path);
 Is = im2single(copy_img);
 [c_r, c_c, c_channel] = size(Is);
 %% Parameter settings for SLIC-based segmentation (parameters are chosen for MICC_F600 dataset)
 
 split_path = strsplit(path,'\');
-set = split_path(5);
+set = split_path(end-1);
 
 if strcmpi(set,'MICC_F600')
     % parameters for vl_slic
@@ -180,6 +184,7 @@ imshow(B);
 %% Second Matching (Iteration)
 
 % EM algorithm for estimating tform more accurately
+converge_mark = [];
 for pair = 1:num_pair
     src_idx = patch_pair(pair,1);
     cmf_idx = patch_pair(pair,2);
@@ -233,11 +238,6 @@ for pair = 1:num_pair
         X_tilde = H_cur.'*Y;
 
        %% Second step: calculate Hn
-        % Construct X_prime which stores the coordinates of suspicious patches
-        % in original image
-        [cmf_row,cmf_col] = find(SEGMENTS==cmf_idx);
-        X_prime = [cmf_col.'; cmf_row.';  ones(1,size(cmf_row,1))];
-        
         % Quadratic optimization
         H_prev = H_cur;
         H_cur = inv(X*X.')*X*X_tilde.';
@@ -246,7 +246,23 @@ for pair = 1:num_pair
         tforms(pair) = affine2d(H_cur);
         iter = iter+1;
     end
+    if iter < Iter_thres
+        converge_mark = [converge_mark; pair];
+    end
 end
+patch_pair = patch_pair(converge_mark,:);
+patch_keypoints = patch_keypoints(converge_mark,:);
+tforms = tforms(converge_mark,:);
 
 %% Visualize the copy move fogery region
-
+ MAP = zeros(size(SEGMENTS));
+ 
+ for pair = 1:num_pair
+      map = zeros(size(SEGMENTS));
+      map(SEGMENTS==patch_pair(pair,1)) = 255;
+      map = map | imwarp(map,tforms(pair),'OutputView',imref2d(size(map)));
+      MAP = MAP | map;
+ end
+gt_blue=imoverlay(MAP,double(gt)-double(MAP),'blue');
+result_with_gt =  imoverlay(gt_blue,MAP,'white');
+imshow(result_with_gt);
